@@ -71,7 +71,7 @@ def get_user_categories(db: Session, user_id: int):
 
 def get_category(db: Session, category_id: int, user_id: int) -> Optional[models.Category]:
     return db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == user_id).first()
-
+    
 def update_category(db: Session, category_id: int, user_id: int, cat_in: schemas.CategoryUpdate) -> Optional[models.Category]:
     category = get_category(db, category_id, user_id)
     if not category:
@@ -86,6 +86,15 @@ def delete_category(db: Session, category_id: int, user_id: int) -> bool:
     category = get_category(db, category_id, user_id)
     if not category:
         return False
+    # Find or create default "Uncategorized" category
+    default_cat = db.query(models.Category).filter(models.Category.user_id == user_id, models.Category.name == "Uncategorized").first()
+    if not default_cat:
+        default_cat = models.Category(name="Uncategorized", user_id=user_id)
+        db.add(default_cat)
+        db.commit()
+        db.refresh(default_cat)
+    # Reassign transactions to default category
+    db.query(models.Transaction).filter(models.Transaction.category_id == category_id).update({"category_id": default_cat.id})
     db.delete(category)
     db.commit()
     return True
@@ -116,28 +125,18 @@ def get_transactions_by_category(db: Session, category_id: int):
 def get_transaction(db: Session, transaction_id: int, user_id: int) -> Optional[models.Transaction]:
     return db.query(models.Transaction).filter(models.Transaction.id == transaction_id, models.Transaction.user_id == user_id).first()
 
-def update_transaction(db: Session, transaction_id: int, user_id: int, tx_in: schemas.TransactionUpdate) -> Optional[models.Transaction]:
-    transaction = get_transaction(db, transaction_id, user_id)
-    if not transaction:
-        return None
-    if tx_in.title is not None:
-        transaction.title = tx_in.title
-    if tx_in.amount is not None:
-        transaction.amount = tx_in.amount
-    if tx_in.category_id is not None:
-        # Optional: validate category belongs to user
-        if tx_in.category_id:
-            cat = db.query(models.Category).filter(models.Category.id == tx_in.category_id, models.Category.user_id == user_id).first()
-            if not cat:
-                raise ValueError("Invalid category")
-        transaction.category_id = tx_in.category_id
-    if tx_in.date is not None:
-        transaction.date = tx_in.date
-    if tx_in.notes is not None:
-        transaction.notes = tx_in.notes
+# Update create_user to ensure "Uncategorized" category exists
+def create_user(db: Session, user_in: schemas.UserCreate) -> models.User:
+    hashed = security.get_password_hash(user_in.password)
+    db_user = models.User(email=user_in.email, hashed_password=hashed, username=user_in.username)
+    db.add(db_user)
     db.commit()
-    db.refresh(transaction)
-    return transaction
+    db.refresh(db_user)
+    # Create default "Uncategorized" category
+    default_cat = models.Category(name="Uncategorized", user_id=db_user.id)
+    db.add(default_cat)
+    db.commit()
+    return db_user
 
 def delete_transaction(db: Session, transaction_id: int, user_id: int) -> bool:
     transaction = get_transaction(db, transaction_id, user_id)
