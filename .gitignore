@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+*.venv/
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# SQLite database
+*.db
+*.sqlite3
+
+# VS Code
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# Pytest cache
+.pytest_cache/
+
+# IDE / Editor settings
+.idea/
+*.iml
+
+# Node / Vue.js
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+
+# Build / Cache
+*.egg-info/
+*.egg
+build/
