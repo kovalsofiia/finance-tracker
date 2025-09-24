@@ -69,6 +69,27 @@ def create_category(db: Session, user_id: int, cat_in: schemas.CategoryCreate) -
 def get_user_categories(db: Session, user_id: int):
     return db.query(models.Category).filter(models.Category.user_id == user_id).all()
 
+def get_category(db: Session, category_id: int, user_id: int) -> Optional[models.Category]:
+    return db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == user_id).first()
+
+def update_category(db: Session, category_id: int, user_id: int, cat_in: schemas.CategoryUpdate) -> Optional[models.Category]:
+    category = get_category(db, category_id, user_id)
+    if not category:
+        return None
+    if cat_in.name is not None:
+        category.name = cat_in.name
+    db.commit()
+    db.refresh(category)
+    return category
+
+def delete_category(db: Session, category_id: int, user_id: int) -> bool:
+    category = get_category(db, category_id, user_id)
+    if not category:
+        return False
+    db.delete(category)
+    db.commit()
+    return True
+
 # Transactions
 
 # ДОДАТИ ТРАНЗАКЦІЮ ДЛЯ ПОТОЧНОГО КОРИСТУВАЧА
@@ -92,7 +113,49 @@ def get_user_transactions(db: Session, user_id: int, skip: int = 0, limit: int =
 def get_transactions_by_category(db: Session, category_id: int):
     return db.query(models.Transaction).filter(models.Transaction.category_id == category_id).all()
 
+def get_transaction(db: Session, transaction_id: int, user_id: int) -> Optional[models.Transaction]:
+    return db.query(models.Transaction).filter(models.Transaction.id == transaction_id, models.Transaction.user_id == user_id).first()
+
+def update_transaction(db: Session, transaction_id: int, user_id: int, tx_in: schemas.TransactionUpdate) -> Optional[models.Transaction]:
+    transaction = get_transaction(db, transaction_id, user_id)
+    if not transaction:
+        return None
+    if tx_in.title is not None:
+        transaction.title = tx_in.title
+    if tx_in.amount is not None:
+        transaction.amount = tx_in.amount
+    if tx_in.category_id is not None:
+        # Optional: validate category belongs to user
+        if tx_in.category_id:
+            cat = db.query(models.Category).filter(models.Category.id == tx_in.category_id, models.Category.user_id == user_id).first()
+            if not cat:
+                raise ValueError("Invalid category")
+        transaction.category_id = tx_in.category_id
+    if tx_in.date is not None:
+        transaction.date = tx_in.date
+    if tx_in.notes is not None:
+        transaction.notes = tx_in.notes
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+def delete_transaction(db: Session, transaction_id: int, user_id: int) -> bool:
+    transaction = get_transaction(db, transaction_id, user_id)
+    if not transaction:
+        return False
+    db.delete(transaction)
+    db.commit()
+    return True
+
 # ПОКАЗАТИ БАЛАНС ПОТОЧНОГО КОРИСТУВАЧА
 def get_user_balance(db: Session, user_id: int) -> float:
     total = db.query(func.coalesce(func.sum(models.Transaction.amount), 0.0)).filter(models.Transaction.user_id == user_id).scalar()
     return float(total)
+
+
+def get_category_transactions(db: Session, category_id: int, user_id: int) -> list[models.Transaction]:
+    # Check if category belongs to the user
+    cat = db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == user_id).first()
+    if not cat:
+        return []
+    return db.query(models.Transaction).filter(models.Transaction.category_id == category_id).all()

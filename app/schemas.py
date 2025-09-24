@@ -36,6 +36,9 @@ class CategoryRead(BaseModel):
     class Config:
         orm_mode = True
 
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+
 # ---- Transactions ----
 class TransactionCreate(BaseModel):
     title: Optional[str]
@@ -56,6 +59,13 @@ class TransactionRead(BaseModel):
 
     class Config:
         orm_mode = True
+
+class TransactionUpdate(BaseModel):
+    title: Optional[str] = None
+    amount: Optional[float] = None
+    category_id: Optional[int] = None
+    date: Optional[datetime] = None
+    notes: Optional[str] = None
 
 # ---- Auth token ----
 class Token(BaseModel):

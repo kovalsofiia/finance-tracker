@@ -92,8 +92,31 @@ def create_category(cat_in: schemas.CategoryCreate, db: Session = Depends(get_db
     return crud.create_category(db, current_user.id, cat_in)
 
 @app.get("/users/{user_id}/categories", response_model=list[schemas.CategoryRead])
-def read_user_categories(user_id: int, db: Session = Depends(get_db)):
+def read_user_categories(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user's categories")
     return crud.get_user_categories(db, user_id)
+
+@app.get("/categories/{category_id}", response_model=schemas.CategoryRead)
+def read_category(category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    category = crud.get_category(db, category_id, current_user.id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found or not yours")
+    return category
+
+@app.put("/categories/{category_id}", response_model=schemas.CategoryRead)
+def update_category(category_id: int, cat_in: schemas.CategoryUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    updated = crud.update_category(db, category_id, current_user.id, cat_in)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Category not found or not yours")
+    return updated
+
+@app.delete("/categories/{category_id}", status_code=204)
+def delete_category(category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    deleted = crud.delete_category(db, category_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Category not found or not yours")
+    return {"detail": "Category deleted"}
 
 # --- Transactions ---
 @app.post("/transactions/", response_model=schemas.TransactionRead)
@@ -106,10 +129,44 @@ def create_transaction(tx_in: schemas.TransactionCreate, db: Session = Depends(g
     tx = crud.create_transaction(db, current_user.id, tx_in)
     return tx
 
-@app.get("/users/me/transactions", response_model=list[schemas.TransactionRead])
-def read_my_transactions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    return crud.get_user_transactions(db, current_user.id, skip, limit)
+@app.get("/transactions/{transaction_id}", response_model=schemas.TransactionRead)
+def read_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    transaction = crud.get_transaction(db, transaction_id, current_user.id)
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found or not yours")
+    return transaction
+
+@app.put("/transactions/{transaction_id}", response_model=schemas.TransactionRead)
+def update_transaction(transaction_id: int, tx_in: schemas.TransactionUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    # In crud.update_transaction, it already handles category validation
+    updated = crud.update_transaction(db, transaction_id, current_user.id, tx_in)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Transaction not found or not yours")
+    return updated
+
+@app.delete("/transactions/{transaction_id}", status_code=204)
+def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    deleted = crud.delete_transaction(db, transaction_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Transaction not found or not yours")
+    return {"detail": "Transaction deleted"}
+
+@app.get("/users/{user_id}/transactions", response_model=list[schemas.TransactionRead])
+def read_user_transactions(user_id: int, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user's transactions")
+    return crud.get_user_transactions(db, user_id, skip, limit)
 
 @app.get("/users/me/balance")
 def get_my_balance(db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
     return {"balance": crud.get_user_balance(db, current_user.id)}
+
+
+@app.get("/users/{user_id}/categories/{category_id}/transactions", response_model=list[schemas.TransactionRead])
+def read_category_transactions(user_id: int, category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user's category transactions")
+    transactions = crud.get_category_transactions(db, category_id, user_id)
+    if not transactions:  # Could be empty list or if category not found
+        raise HTTPException(status_code=404, detail="Category not found or not yours")
+    return transactions
