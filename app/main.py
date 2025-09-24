@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from . import models, database, schemas, crud, security
+from .database import get_db
 
 app = FastAPI(title="Finance Tracker API")
 
@@ -18,13 +19,6 @@ app.add_middleware(
 # Create tables
 models.Base.metadata.create_all(bind=database.engine)
 
-# Dependency
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # --- Auth / Users ---
 
