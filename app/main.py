@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
@@ -23,27 +25,36 @@ models.Base.metadata.create_all(bind=database.engine)
 # --- Auth / Users ---
 
 # Create user (register)
-@app.post("/users/", response_model=schemas.UserRead, status_code=201)
+@app.post("/users/", response_model=dict)  # Змінено response_model
 def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     existing = crud.get_user_by_email(db, user_in.email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     user = crud.create_user(db, user_in)
-    return user
+    access_token = security.create_access_token(data={"sub": user.email})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": schemas.UserRead.from_orm(user)  # Додаємо дані користувача
+    }
 
-# Get all users
-@app.get("/users/", response_model=list[schemas.UserRead])
-def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    return crud.get_users(db, skip=skip, limit=limit)
+@app.post("/token", response_model=schemas.Token)
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # OAuth2PasswordRequestForm has fields username & password (we use username for email)
+    user = crud.authenticate_user(db, email=form_data.username, password=form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    access_token = security.create_access_token(data={"sub": user.email})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # Get current logged-in user
-@app.get("/users/me", response_model=schemas.UserRead)
+@app.get("/profile", response_model=schemas.UserRead)
 def read_current_user(current_user: models.User = Depends(security.get_current_user)):
     return current_user
 
 # Update current user
-@app.put("/users/me", response_model=schemas.UserRead)
+@app.put("/profile", response_model=schemas.UserRead)
 def update_current_user(
     user_in: schemas.UserUpdate,
     db: Session = Depends(get_db),
@@ -55,41 +66,40 @@ def update_current_user(
     return updated_user
 
 # Delete current user
-@app.delete("/users/me", status_code=204)
+@app.delete("/profile", status_code=204)
 def delete_current_user(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(security.get_current_user)
 ):
     crud.delete_user(db, current_user.id)
-    return {"detail": "User deleted"}
+    return None  # Змінено: без тіла відповіді
+
+# Видалено /users/ і /users/{user_id} для безпеки
+
+# Get all users
+
+# @app.get("/users/", response_model=list[schemas.UserRead])
+# def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+#     return crud.get_users(db, skip=skip, limit=limit)
 
 # Get user by ID
-@app.get("/users/{user_id}", response_model=schemas.UserRead)
-def read_user(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    user = crud.get_user(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
-@app.post("/token", response_model=schemas.Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # OAuth2PasswordRequestForm has fields username & password (we use username for email)
-    user = crud.authenticate_user(db, email=form_data.username, password=form_data.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
-    access_token = security.create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+# @app.get("/users/{user_id}", response_model=schemas.UserRead)
+# def read_user(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+#     user = crud.get_user(db, user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+#     return user
+
 
 # --- Categories ---
 @app.post("/categories/", response_model=schemas.CategoryRead)
 def create_category(cat_in: schemas.CategoryCreate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
     return crud.create_category(db, current_user.id, cat_in)
 
-@app.get("/users/{user_id}/categories", response_model=list[schemas.CategoryRead])
-def read_user_categories(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    if current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user's categories")
-    return crud.get_user_categories(db, user_id)
+@app.get("/profile/categories", response_model=list[schemas.CategoryRead])  # Змінено шлях для консистентності
+def read_user_categories(db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+    return crud.get_user_categories(db, current_user.id)
 
 @app.get("/categories/{category_id}", response_model=schemas.CategoryRead)
 def read_category(category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
@@ -110,16 +120,15 @@ def delete_category(category_id: int, db: Session = Depends(get_db), current_use
     deleted = crud.delete_category(db, category_id, current_user.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Category not found or not yours")
-    return {"detail": "Category deleted"}
+    return None  # Змінено: без тіла відповіді
 
 # --- Transactions ---
 @app.post("/transactions/", response_model=schemas.TransactionRead)
 def create_transaction(tx_in: schemas.TransactionCreate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    # Optional: ensure category belongs to this user
     if tx_in.category_id:
         cat = db.query(models.Category).filter(models.Category.id == tx_in.category_id).first()
         if not cat or cat.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid category")
+            raise HTTPException(status_code=400, detail="Invalid category")
     tx = crud.create_transaction(db, current_user.id, tx_in)
     return tx
 
@@ -132,7 +141,10 @@ def read_transaction(transaction_id: int, db: Session = Depends(get_db), current
 
 @app.put("/transactions/{transaction_id}", response_model=schemas.TransactionRead)
 def update_transaction(transaction_id: int, tx_in: schemas.TransactionUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    # In crud.update_transaction, it already handles category validation
+    if tx_in.category_id:
+        cat = db.query(models.Category).filter(models.Category.id == tx_in.category_id).first()
+        if not cat or cat.user_id != current_user.id:
+            raise HTTPException(status_code=400, detail="Invalid category")
     updated = crud.update_transaction(db, transaction_id, current_user.id, tx_in)
     if not updated:
         raise HTTPException(status_code=404, detail="Transaction not found or not yours")
@@ -143,24 +155,27 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
     deleted = crud.delete_transaction(db, transaction_id, current_user.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Transaction not found or not yours")
-    return {"detail": "Transaction deleted"}
+    return None  # Змінено: без тіла відповіді
 
-@app.get("/users/{user_id}/transactions", response_model=list[schemas.TransactionRead])
-def read_user_transactions(user_id: int, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    if current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user's transactions")
-    return crud.get_user_transactions(db, user_id, skip, limit)
+@app.get("/profile/transactions", response_model=list[schemas.TransactionRead])
+def read_user_transactions(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+    skip: int = 0,
+    limit: int = 100,
+    start_date: Optional[datetime] = None,  # Додано фільтрацію за датою
+    end_date: Optional[datetime] = None
+):
+    return crud.get_user_transactions(db, current_user.id, skip, limit, start_date, end_date)
 
-@app.get("/users/me/balance")
+@app.get("/profile/balance", response_model=schemas.BalanceRead)
 def get_my_balance(db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    return {"balance": crud.get_user_balance(db, current_user.id)}
+    balance = crud.get_user_balance(db, current_user.id)
+    return {"balance": balance, "currency": "USD", "updated_at": datetime.utcnow()}
 
-
-@app.get("/users/{user_id}/categories/{category_id}/transactions", response_model=list[schemas.TransactionRead])
-def read_category_transactions(user_id: int, category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    if current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user's category transactions")
-    transactions = crud.get_category_transactions(db, category_id, user_id)
-    if not transactions:  # Could be empty list or if category not found
+@app.get("/profile/categories/{category_id}/transactions", response_model=list[schemas.TransactionRead])
+def read_category_transactions(category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user), skip: int = 0, limit: int = 100):
+    transactions = crud.get_category_transactions(db, category_id, current_user.id, skip, limit)
+    if not transactions and not db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == current_user.id).first():
         raise HTTPException(status_code=404, detail="Category not found or not yours")
     return transactions

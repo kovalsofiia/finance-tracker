@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
 from datetime import datetime
 from typing import Optional
 
@@ -6,7 +6,13 @@ from typing import Optional
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
-    username: Optional[str]
+    username: str
+
+    @validator("password")
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
 
 class UserRead(BaseModel):
     id: int
@@ -71,3 +77,12 @@ class TransactionUpdate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+# ---- Balance ----
+class BalanceRead(BaseModel):
+    balance: float
+    currency: str = "USD"  # За замовчуванням, можна зробити конфігурацією
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True

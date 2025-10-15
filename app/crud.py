@@ -1,3 +1,5 @@
+from datetime import datetime
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from . import models, schemas, security
 from typing import Optional
@@ -20,6 +22,9 @@ def update_user(db: Session, user_id: int, user_in: schemas.UserUpdate):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         return None
+    if user_in.email and user_in.email != user.email:
+        if db.query(models.User).filter(models.User.email == user_in.email).first():
+            raise HTTPException(status_code=400, detail="Email already registered")
     if user_in.username:
         user.username = user_in.username
     if user_in.email:
@@ -59,6 +64,8 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[models
 
 # СТВОРИТИ КАТЕГОРІЮ ДЛЯ ПОТОЧНОГО КОРИСТУВАЧА
 def create_category(db: Session, user_id: int, cat_in: schemas.CategoryCreate) -> models.Category:
+    if db.query(models.Category).filter(models.Category.user_id == user_id, models.Category.name == cat_in.name).first():
+        raise HTTPException(status_code=400, detail="Category name already exists for this user")
     db_cat = models.Category(name=cat_in.name, user_id=user_id)
     db.add(db_cat)
     db.commit()
@@ -77,6 +84,8 @@ def update_category(db: Session, category_id: int, user_id: int, cat_in: schemas
     if not category:
         return None
     if cat_in.name is not None:
+        if db.query(models.Category).filter(models.Category.user_id == user_id, models.Category.name == cat_in.name).first():
+            raise HTTPException(status_code=400, detail="Category name already exists for this user")
         category.name = cat_in.name
     db.commit()
     db.refresh(category)
@@ -114,9 +123,41 @@ def create_transaction(db: Session, user_id: int, tx_in: schemas.TransactionCrea
     db.refresh(db_tx)
     return db_tx
 
+def update_transaction(db: Session, transaction_id: int, user_id: int, tx_in: schemas.TransactionUpdate) -> Optional[models.Transaction]:
+    transaction = get_transaction(db, transaction_id, user_id)
+    if not transaction:
+        return None
+    data = tx_in.dict(exclude_unset=True)
+    # Перевіряємо, чи category_id належить користувачу, якщо надано
+    if "category_id" in data and data["category_id"] is not None:
+        category = db.query(models.Category).filter(
+            models.Category.id == data["category_id"],
+            models.Category.user_id == user_id
+        ).first()
+        if not category:
+            raise HTTPException(status_code=400, detail="Category not found or not yours")
+    for key, value in data.items():
+        setattr(transaction, key, value)
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+def delete_transaction(db: Session, transaction_id: int, user_id: int) -> bool:
+    transaction = get_transaction(db, transaction_id, user_id)
+    if not transaction:
+        return False
+    db.delete(transaction)
+    db.commit()
+    return True
+
 # ПОКАЗАТИ УСІ ТРАНЗАКЦІЇ ПОТОЧНОГО КОРИСТУВАЧА
-def get_user_transactions(db: Session, user_id: int, skip: int = 0, limit: int = 100):
-    return db.query(models.Transaction).filter(models.Transaction.user_id == user_id).order_by(models.Transaction.date.desc()).offset(skip).limit(limit).all()
+def get_user_transactions(db: Session, user_id: int, skip: int = 0, limit: int = 100, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
+    query = db.query(models.Transaction).filter(models.Transaction.user_id == user_id)
+    if start_date:
+        query = query.filter(models.Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(models.Transaction.date <= end_date)
+    return query.order_by(models.Transaction.date.desc()).offset(skip).limit(limit).all()
 
 # ПОКАЗАТИ ТРАНЗАКЦІЇ ПОТОЧНОГО КОРИСТУВАЧА ЗА КАТЕГОРІЄЮ
 def get_transactions_by_category(db: Session, category_id: int):
@@ -138,23 +179,16 @@ def create_user(db: Session, user_in: schemas.UserCreate) -> models.User:
     db.commit()
     return db_user
 
-def delete_transaction(db: Session, transaction_id: int, user_id: int) -> bool:
-    transaction = get_transaction(db, transaction_id, user_id)
-    if not transaction:
-        return False
-    db.delete(transaction)
-    db.commit()
-    return True
+
 
 # ПОКАЗАТИ БАЛАНС ПОТОЧНОГО КОРИСТУВАЧА
 def get_user_balance(db: Session, user_id: int) -> float:
     total = db.query(func.coalesce(func.sum(models.Transaction.amount), 0.0)).filter(models.Transaction.user_id == user_id).scalar()
     return float(total)
 
-
-def get_category_transactions(db: Session, category_id: int, user_id: int) -> list[models.Transaction]:
-    # Check if category belongs to the user
+# Update get_category_transactions to support pagination
+def get_category_transactions(db: Session, category_id: int, user_id: int, skip: int = 0, limit: int = 100) -> list[models.Transaction]:
     cat = db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == user_id).first()
     if not cat:
         return []
-    return db.query(models.Transaction).filter(models.Transaction.category_id == category_id).all()
+    return db.query(models.Transaction).filter(models.Transaction.category_id == category_id).order_by(models.Transaction.date.desc()).offset(skip).limit(limit).all()
