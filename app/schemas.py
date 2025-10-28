@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 from typing import Optional
 
@@ -8,12 +8,13 @@ class UserCreate(BaseModel):
     password: str
     username: str
 
-    @validator("password")
+    @field_validator("password")
+    @classmethod
     def validate_password(cls, v):
         if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
+            raise ValueError("Пароль має містити щонайменше 8 символів")
         return v
-
+    
 class UserRead(BaseModel):
     id: int
     email: EmailStr
@@ -22,12 +23,21 @@ class UserRead(BaseModel):
     updated_at: Optional[datetime]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
     password: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if v is None:
+            return v  # Дозволяємо не змінювати пароль
+        if len(v) < 8:
+            raise ValueError("Пароль має містити щонайменше 8 символів")
+        return v
 
 # ---- Categories ----
 class CategoryCreate(BaseModel):
@@ -40,7 +50,7 @@ class CategoryRead(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
@@ -49,9 +59,9 @@ class CategoryUpdate(BaseModel):
 class TransactionCreate(BaseModel):
     title: Optional[str]
     amount: float
-    category_id: Optional[int]
-    date: Optional[datetime]
-    notes: Optional[str]
+    category_id: Optional[int] = None
+    date: Optional[datetime] = None   # Optional + datetime
+    notes: Optional[str] = None       # Optional!
 
 class TransactionRead(BaseModel):
     id: int
@@ -64,7 +74,7 @@ class TransactionRead(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class TransactionUpdate(BaseModel):
     title: Optional[str] = None
@@ -85,4 +95,4 @@ class BalanceRead(BaseModel):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True

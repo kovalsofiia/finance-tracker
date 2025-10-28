@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from . import models, schemas, security
@@ -43,12 +43,17 @@ def delete_user(db: Session, user_id: int):
         db.commit()
 
 # СТВОРИТИ КОРИСТУВАЧА
+#"Uncategorized" category exists
 def create_user(db: Session, user_in: schemas.UserCreate) -> models.User:
     hashed = security.get_password_hash(user_in.password)
     db_user = models.User(email=user_in.email, hashed_password=hashed, username=user_in.username)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+    # Create default "Uncategorized" category
+    default_cat = models.Category(name="Uncategorized", user_id=db_user.id)
+    db.add(default_cat)
+    db.commit()
     return db_user
 
 # ОТРИМАТИ ТОКЕН = ЛОГІН ДЛЯ КОРИСТУВАЧА
@@ -112,11 +117,21 @@ def delete_category(db: Session, category_id: int, user_id: int) -> bool:
 
 # ДОДАТИ ТРАНЗАКЦІЮ ДЛЯ ПОТОЧНОГО КОРИСТУВАЧА
 def create_transaction(db: Session, user_id: int, tx_in: schemas.TransactionCreate) -> models.Transaction:
-    data = tx_in.dict()
-    # ensure date is set if not provided (Pydantic will allow None)
-    if data.get("date") is None:
-        from datetime import datetime
-        data["date"] = datetime.utcnow()
+    data = tx_in.model_dump(exclude_unset=True)
+
+    # Встановлюємо дату, якщо не вказано
+    if "date" not in data or data["date"] is None:
+        data["date"] = datetime.now(timezone.utc)
+
+    # Валідація category_id
+    if "category_id" in data and data["category_id"] is not None:
+        cat = db.query(models.Category).filter(
+            models.Category.id == data["category_id"],
+            models.Category.user_id == user_id
+        ).first()
+        if not cat:
+            raise HTTPException(status_code=400, detail="Invalid category")
+
     db_tx = models.Transaction(user_id=user_id, **data)
     db.add(db_tx)
     db.commit()
@@ -165,21 +180,6 @@ def get_transactions_by_category(db: Session, category_id: int):
 
 def get_transaction(db: Session, transaction_id: int, user_id: int) -> Optional[models.Transaction]:
     return db.query(models.Transaction).filter(models.Transaction.id == transaction_id, models.Transaction.user_id == user_id).first()
-
-# Update create_user to ensure "Uncategorized" category exists
-def create_user(db: Session, user_in: schemas.UserCreate) -> models.User:
-    hashed = security.get_password_hash(user_in.password)
-    db_user = models.User(email=user_in.email, hashed_password=hashed, username=user_in.username)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    # Create default "Uncategorized" category
-    default_cat = models.Category(name="Uncategorized", user_id=db_user.id)
-    db.add(default_cat)
-    db.commit()
-    return db_user
-
-
 
 # ПОКАЗАТИ БАЛАНС ПОТОЧНОГО КОРИСТУВАЧА
 def get_user_balance(db: Session, user_id: int) -> float:
