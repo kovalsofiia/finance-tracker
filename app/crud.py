@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from . import models, schemas, security
 from typing import Optional
 from sqlalchemy import func
-
+from .schemas import TransactionFilter
 # Users
 def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
     return db.query(models.User).filter(models.User.email == email).first()
@@ -166,12 +166,36 @@ def delete_transaction(db: Session, transaction_id: int, user_id: int) -> bool:
     return True
 
 # ПОКАЗАТИ УСІ ТРАНЗАКЦІЇ ПОТОЧНОГО КОРИСТУВАЧА
-def get_user_transactions(db: Session, user_id: int, skip: int = 0, limit: int = 100, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
+def get_user_transactions(
+    db: Session,
+    user_id: int,
+    filters: TransactionFilter,
+    skip: int = 0,
+    limit: int = 100
+) -> list[models.Transaction]:
+    
     query = db.query(models.Transaction).filter(models.Transaction.user_id == user_id)
-    if start_date:
-        query = query.filter(models.Transaction.date >= start_date)
-    if end_date:
-        query = query.filter(models.Transaction.date <= end_date)
+
+    # Фільтр за датою
+    if filters.start_date:
+        query = query.filter(models.Transaction.date >= filters.start_date)
+    if filters.end_date:
+        query = query.filter(models.Transaction.date <= filters.end_date)
+
+    # Фільтр за категорією
+    if filters.category_id is not None:
+        query = query.filter(models.Transaction.category_id == filters.category_id)
+
+    # Фільтр за сумою
+    if filters.min_amount is not None:
+        query = query.filter(models.Transaction.amount >= filters.min_amount)
+    if filters.max_amount is not None:
+        query = query.filter(models.Transaction.amount <= filters.max_amount)
+
+    # Пошук за назвою
+    if filters.title:
+        query = query.filter(models.Transaction.title.ilike(f"%{filters.title}%"))
+
     return query.order_by(models.Transaction.date.desc()).offset(skip).limit(limit).all()
 
 # ПОКАЗАТИ ТРАНЗАКЦІЇ ПОТОЧНОГО КОРИСТУВАЧА ЗА КАТЕГОРІЄЮ

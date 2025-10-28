@@ -2,6 +2,14 @@ from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 from typing import Optional
 
+class TransactionFilter(BaseModel):
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    category_id: Optional[int] = None
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
+    title: Optional[str] = None
+
 # ---- Users ----
 class UserCreate(BaseModel):
     email: EmailStr

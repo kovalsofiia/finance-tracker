@@ -132,12 +132,21 @@ def create_transaction(tx_in: schemas.TransactionCreate, db: Session = Depends(g
     tx = crud.create_transaction(db, current_user.id, tx_in)
     return tx
 
-@app.get("/transactions/{transaction_id}", response_model=schemas.TransactionRead)
-def read_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    transaction = crud.get_transaction(db, transaction_id, current_user.id)
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found or not yours")
-    return transaction
+# @app.get("/transactions/{transaction_id}", response_model=schemas.TransactionRead)
+# def read_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+#     transaction = crud.get_transaction(db, transaction_id, current_user.id)
+#     if not transaction:
+#         raise HTTPException(status_code=404, detail="Transaction not found or not yours")
+#     return transaction
+@app.get("/profile/transactions", response_model=list[schemas.TransactionRead])
+def read_user_transactions(
+    filters: schemas.TransactionFilter = Depends(),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    return crud.get_user_transactions(db, current_user.id, filters, skip, limit)
 
 @app.put("/transactions/{transaction_id}", response_model=schemas.TransactionRead)
 def update_transaction(transaction_id: int, tx_in: schemas.TransactionUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
