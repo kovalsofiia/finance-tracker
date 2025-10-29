@@ -15,15 +15,26 @@ class User(Base):
     categories = relationship("Category", back_populates="user", cascade="all, delete")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete")
 
+# models.py
 class Category(Base):
     __tablename__ = "categories"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("categories.id"), nullable=True)  # Нова колонка
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="categories")
     transactions = relationship("Transaction", back_populates="category")
+    
+    # Для рекурсії: дочірні категорії
+    children = relationship(
+        "Category",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
+    parent = relationship("Category", remote_side=[id], back_populates="children")
 
 class Transaction(Base):
     __tablename__ = "transactions"

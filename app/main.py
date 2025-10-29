@@ -94,7 +94,11 @@ def delete_current_user(
 
 # --- Categories ---
 @app.post("/categories/", response_model=schemas.CategoryRead)
-def create_category(cat_in: schemas.CategoryCreate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+def create_category(
+    cat_in: schemas.CategoryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
     return crud.create_category(db, current_user.id, cat_in)
 
 @app.get("/profile/categories", response_model=list[schemas.CategoryRead])  # Змінено шлях для консистентності
@@ -109,18 +113,32 @@ def read_category(category_id: int, db: Session = Depends(get_db), current_user:
     return category
 
 @app.put("/categories/{category_id}", response_model=schemas.CategoryRead)
-def update_category(category_id: int, cat_in: schemas.CategoryUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+def update_category(
+    category_id: int,
+    cat_in: schemas.CategoryUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
     updated = crud.update_category(db, category_id, current_user.id, cat_in)
     if not updated:
-        raise HTTPException(status_code=404, detail="Category not found or not yours")
+        raise HTTPException(status_code=404, detail="Category not found")
     return updated
 
 @app.delete("/categories/{category_id}", status_code=204)
-def delete_category(category_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    deleted = crud.delete_category(db, category_id, current_user.id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Category not found or not yours")
-    return None  # Змінено: без тіла відповіді
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    try:
+        deleted = crud.delete_category(db, category_id, current_user.id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Category not found")
+    except HTTPException as e:
+        if e.status_code == 400:          # помилки валідації (транзакції, підкатегорії, цикл…)
+            raise                         # передаємо клієнту 400
+        raise HTTPException(status_code=404, detail="Category not found")
+    return None
 
 # --- Transactions ---
 @app.post("/transactions/", response_model=schemas.TransactionRead)

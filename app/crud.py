@@ -50,10 +50,9 @@ def create_user(db: Session, user_in: schemas.UserCreate) -> models.User:
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    # Create default "Uncategorized" category
-    default_cat = models.Category(name="Uncategorized", user_id=db_user.id)
-    db.add(default_cat)
-    db.commit()
+
+    # Автоматично створюємо "Uncategorized"
+    get_or_create_uncategorized(db, db_user.id)
     return db_user
 
 # ОТРИМАТИ ТОКЕН = ЛОГІН ДЛЯ КОРИСТУВАЧА
@@ -69,46 +68,147 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[models
 
 # СТВОРИТИ КАТЕГОРІЮ ДЛЯ ПОТОЧНОГО КОРИСТУВАЧА
 def create_category(db: Session, user_id: int, cat_in: schemas.CategoryCreate) -> models.Category:
-    if db.query(models.Category).filter(models.Category.user_id == user_id, models.Category.name == cat_in.name).first():
-        raise HTTPException(status_code=400, detail="Category name already exists for this user")
-    db_cat = models.Category(name=cat_in.name, user_id=user_id)
+    # Перевірка на унікальність імені в межах користувача і батька
+    query = db.query(models.Category).filter(
+        models.Category.user_id == user_id,
+        models.Category.name == cat_in.name
+    )
+    if cat_in.parent_id:
+        query = query.filter(models.Category.parent_id == cat_in.parent_id)
+    else:
+        query = query.filter(models.Category.parent_id.is_(None))
+
+    if query.first():
+        raise HTTPException(status_code=400, detail="Category name already exists at this level")
+
+    # Валідація parent_id
+    if cat_in.parent_id:
+        parent = db.query(models.Category).filter(
+            models.Category.id == cat_in.parent_id,
+            models.Category.user_id == user_id
+        ).first()
+        if not parent:
+            raise HTTPException(status_code=400, detail="Parent category not found")
+
+    db_cat = models.Category(name=cat_in.name, user_id=user_id, parent_id=cat_in.parent_id)
     db.add(db_cat)
     db.commit()
     db.refresh(db_cat)
     return db_cat
 
 # ПОКАЗАТИ УСІ КАТЕГОРІЇ ДЛЯ ПОТОЧНОГО КОРИСТУВАЧА
+# crud.py
+
 def get_user_categories(db: Session, user_id: int):
-    return db.query(models.Category).filter(models.Category.user_id == user_id).all()
+    # Отримуємо кореневі категорії
+    root_categories = db.query(models.Category).filter(
+        models.Category.user_id == user_id,
+        models.Category.parent_id.is_(None)
+    ).all()
+
+    def build_tree(categories):
+        result = []
+        for cat in categories:
+            # Серіалізуємо категорію
+            serialized = schemas.CategoryRead.from_orm(cat)
+
+            # Отримуємо дочірні категорії
+            children = db.query(models.Category).filter(
+                models.Category.parent_id == cat.id
+            ).all()
+            serialized.children = build_tree(children)
+
+            # ДОДАЄМО ТРАНЗАКЦІЇ ЦІЄЇ КАТЕГОРІЇ
+            txs = db.query(models.Transaction).filter(
+                models.Transaction.category_id == cat.id
+            ).order_by(models.Transaction.date.desc()).all()
+
+            serialized.transactions = [
+                schemas.TransactionRead.from_orm(tx) for tx in txs
+            ]
+
+            result.append(serialized)
+        return result
+
+    return build_tree(root_categories)
 
 def get_category(db: Session, category_id: int, user_id: int) -> Optional[models.Category]:
     return db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == user_id).first()
     
 def update_category(db: Session, category_id: int, user_id: int, cat_in: schemas.CategoryUpdate) -> Optional[models.Category]:
-    category = get_category(db, category_id, user_id)
+    category = db.query(models.Category).filter(
+        models.Category.id == category_id,
+        models.Category.user_id == user_id
+    ).first()
     if not category:
         return None
+
     if cat_in.name is not None:
-        if db.query(models.Category).filter(models.Category.user_id == user_id, models.Category.name == cat_in.name).first():
-            raise HTTPException(status_code=400, detail="Category name already exists for this user")
+        # Унікальність на тому ж рівні
+        query = db.query(models.Category).filter(
+            models.Category.user_id == user_id,
+            models.Category.name == cat_in.name,
+            models.Category.id != category_id
+        )
+        if category.parent_id:
+            query = query.filter(models.Category.parent_id == category.parent_id)
+        else:
+            query = query.filter(models.Category.parent_id.is_(None))
+        if query.first():
+            raise HTTPException(status_code=400, detail="Category name already exists at this level")
         category.name = cat_in.name
+
+    if cat_in.parent_id is not None:
+        if cat_in.parent_id == category_id:
+            raise HTTPException(status_code=400, detail="Category cannot be its own parent")
+
+        # Перевірка, чи parent існує і належить користувачу
+        parent = db.query(models.Category).filter(
+            models.Category.id == cat_in.parent_id,
+            models.Category.user_id == user_id
+        ).first()
+        if not parent and cat_in.parent_id != 0:  # 0 або None = корінь
+            raise HTTPException(status_code=400, detail="Parent category not found")
+
+        # Заборона циклу
+        current = parent
+        while current:
+            if current.id == category_id:
+                raise HTTPException(status_code=400, detail="Cannot create category cycle")
+            current = current.parent
+
+        category.parent_id = cat_in.parent_id if cat_in.parent_id != 0 else None
+
     db.commit()
     db.refresh(category)
     return category
 
 def delete_category(db: Session, category_id: int, user_id: int) -> bool:
-    category = get_category(db, category_id, user_id)
+    category = db.query(models.Category).filter(
+        models.Category.id == category_id,
+        models.Category.user_id == user_id
+    ).first()
     if not category:
         return False
-    # Find or create default "Uncategorized" category
-    default_cat = db.query(models.Category).filter(models.Category.user_id == user_id, models.Category.name == "Uncategorized").first()
-    if not default_cat:
-        default_cat = models.Category(name="Uncategorized", user_id=user_id)
-        db.add(default_cat)
-        db.commit()
-        db.refresh(default_cat)
-    # Reassign transactions to default category
-    db.query(models.Transaction).filter(models.Transaction.category_id == category_id).update({"category_id": default_cat.id})
+
+    # Перевіряємо, чи є транзакції
+    has_transactions = db.query(models.Transaction).filter(
+        models.Transaction.category_id == category_id
+    ).first()
+    if has_transactions:
+        raise HTTPException(status_code=400, detail="Cannot delete category with transactions")
+
+    # Якщо є дочірні категорії — не дозволяємо видаляти
+    has_children = db.query(models.Category).filter(
+        models.Category.parent_id == category_id
+    ).first()
+    if has_children:
+        raise HTTPException(status_code=400, detail="Cannot delete category with subcategories")
+
+    # Якщо це "Uncategorized" — не дозволяємо видаляти
+    if category.name == "Uncategorized":
+        raise HTTPException(status_code=400, detail="Cannot delete default category")
+
     db.delete(category)
     db.commit()
     return True
@@ -116,21 +216,39 @@ def delete_category(db: Session, category_id: int, user_id: int) -> bool:
 # Transactions
 
 # ДОДАТИ ТРАНЗАКЦІЮ ДЛЯ ПОТОЧНОГО КОРИСТУВАЧА
+
+def get_or_create_uncategorized(db: Session, user_id: int) -> models.Category:
+    uncategorized = db.query(models.Category).filter(
+        models.Category.user_id == user_id,
+        models.Category.name == "Uncategorized"
+    ).first()
+    if not uncategorized:
+        uncategorized = models.Category(name="Uncategorized", user_id=user_id)
+        db.add(uncategorized)
+        db.commit()
+        db.refresh(uncategorized)
+    return uncategorized
+
 def create_transaction(db: Session, user_id: int, tx_in: schemas.TransactionCreate) -> models.Transaction:
     data = tx_in.model_dump(exclude_unset=True)
 
-    # Встановлюємо дату, якщо не вказано
     if "date" not in data or data["date"] is None:
         data["date"] = datetime.now(timezone.utc)
 
     # Валідація category_id
+    category = None
     if "category_id" in data and data["category_id"] is not None:
-        cat = db.query(models.Category).filter(
+        category = db.query(models.Category).filter(
             models.Category.id == data["category_id"],
             models.Category.user_id == user_id
         ).first()
-        if not cat:
+        if not category:
             raise HTTPException(status_code=400, detail="Invalid category")
+
+    # Якщо категорія не вказана — використовуємо "Uncategorized"
+    if category is None:
+        category = get_or_create_uncategorized(db, user_id)
+        data["category_id"] = category.id
 
     db_tx = models.Transaction(user_id=user_id, **data)
     db.add(db_tx)
@@ -142,8 +260,9 @@ def update_transaction(db: Session, transaction_id: int, user_id: int, tx_in: sc
     transaction = get_transaction(db, transaction_id, user_id)
     if not transaction:
         return None
-    data = tx_in.dict(exclude_unset=True)
-    # Перевіряємо, чи category_id належить користувачу, якщо надано
+
+    data = tx_in.model_dump(exclude_unset=True)
+
     if "category_id" in data and data["category_id"] is not None:
         category = db.query(models.Category).filter(
             models.Category.id == data["category_id"],
@@ -151,8 +270,14 @@ def update_transaction(db: Session, transaction_id: int, user_id: int, tx_in: sc
         ).first()
         if not category:
             raise HTTPException(status_code=400, detail="Category not found or not yours")
+    elif "category_id" in data and data["category_id"] is None:
+        # Дозволяємо встановити NULL → перемістити в "Uncategorized"
+        uncategorized = get_or_create_uncategorized(db, user_id)
+        data["category_id"] = uncategorized.id
+
     for key, value in data.items():
         setattr(transaction, key, value)
+
     db.commit()
     db.refresh(transaction)
     return transaction

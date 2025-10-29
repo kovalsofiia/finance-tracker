@@ -48,20 +48,17 @@ class UserUpdate(BaseModel):
         return v
 
 # ---- Categories ----
-class CategoryCreate(BaseModel):
+class CategoryBase(BaseModel):
     name: str
+    parent_id: Optional[int] = None
 
-class CategoryRead(BaseModel):
-    id: int
-    name: str
-    user_id: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
+class CategoryCreate(CategoryBase):
+    pass
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
+    parent_id: Optional[int] = None  # Дозволяємо змінювати батька
+
 
 # ---- Transactions ----
 class TransactionCreate(BaseModel):
@@ -91,6 +88,18 @@ class TransactionUpdate(BaseModel):
     date: Optional[datetime] = None
     notes: Optional[str] = None
 
+class CategoryRead(BaseModel):
+    id: int
+    name: str
+    user_id: int
+    parent_id: Optional[int]
+    created_at: datetime
+    children: list['CategoryRead'] = []
+    transactions: list['TransactionRead'] = []  # ← ДОДАЄМО
+
+    class Config:
+        from_attributes = True
+
 # ---- Auth token ----
 class Token(BaseModel):
     access_token: str
@@ -104,3 +113,6 @@ class BalanceRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Оновлюємо рекурсію
+CategoryRead.model_rebuild()
