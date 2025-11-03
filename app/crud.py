@@ -341,3 +341,111 @@ def get_category_transactions(db: Session, category_id: int, user_id: int, skip:
     if not cat:
         return []
     return db.query(models.Transaction).filter(models.Transaction.category_id == category_id).order_by(models.Transaction.date.desc()).offset(skip).limit(limit).all()
+
+
+
+# MKR-1
+# Libraries
+
+def create_library(db: Session, user_id: int, lib_in: schemas.LibraryCreate) -> models.Library:
+    # Перевірка на дублікат
+    exists = db.query(models.Library).filter(
+        models.Library.user_id == user_id,
+        models.Library.library_name == lib_in.library_name,
+        models.Library.city == lib_in.city
+    ).first()
+    if exists:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Бібліотека '{lib_in.library_name}' у місті '{lib_in.city}' вже існує"
+        )
+
+    db_lib = models.Library(**lib_in.model_dump(), user_id=user_id)
+    db.add(db_lib)
+    db.commit()
+    db.refresh(db_lib)
+    return db_lib
+
+def get_user_libraries(
+    db: Session,
+    user_id: int,
+    filters: Optional[schemas.LibraryFilter] = None,
+    skip: int = 0,
+    limit: int = 100
+) -> list[models.Library]:
+    query = db.query(models.Library).filter(models.Library.user_id == user_id)
+
+    if filters:
+        if filters.search:
+            query = query.filter(models.Library.library_name.ilike(f"%{filters.search}%"))
+        if filters.city:
+            query = query.filter(models.Library.city == filters.city)
+        if filters.min_books is not None:
+            query = query.filter(models.Library.books_amount >= filters.min_books)
+
+        # Sorting
+        if filters.sort_by:
+            col = {
+                "name": models.Library.library_name,
+                "books": models.Library.books_amount,
+                "visitors": models.Library.visitors_per_year,
+                "created": models.Library.created_at
+            }.get(filters.sort_by)
+            if col:
+                order = col.desc() if filters.sort_order == "desc" else col.asc()
+                query = query.order_by(order)
+
+    return query.offset(skip).limit(limit).all()
+
+def get_library_stats(db: Session, user_id: int):
+    total_libs = db.query(models.Library).filter(models.Library.user_id == user_id).count()
+    total_books = db.query(func.sum(models.Library.books_amount)).filter(models.Library.user_id == user_id).scalar() or 0
+    total_visitors = db.query(func.sum(models.Library.visitors_per_year)).filter(models.Library.user_id == user_id).scalar() or 0
+    return {
+        "total_libraries": total_libs,
+        "total_books": int(total_books),
+        "total_visitors": int(total_visitors)
+    }
+
+def get_library(db: Session, library_id: int, user_id: int) -> Optional[models.Library]:
+    return db.query(models.Library).filter(models.Library.id == library_id, models.Library.user_id == user_id).first()
+
+def update_library(db: Session, library_id: int, user_id: int, lib_in: schemas.LibraryUpdate) -> Optional[models.Library]:
+    library = get_library(db, library_id, user_id)
+    if not library:
+        return None
+
+    data = lib_in.model_dump(exclude_unset=True)
+
+    # Якщо змінюється назва або місто — перевіряємо унікальність
+    if "library_name" in data or "city" in data:
+        new_name = data.get("library_name", library.library_name)
+        new_city = data.get("city", library.city)
+
+        duplicate = db.query(models.Library).filter(
+            models.Library.user_id == user_id,
+            models.Library.library_name == new_name,
+            models.Library.city == new_city,
+            models.Library.id != library_id
+        ).first()
+
+        if duplicate:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Бібліотека '{new_name}' у місті '{new_city}' вже існує."
+            )
+
+    for key, value in data.items():
+        setattr(library, key, value)
+
+    db.commit()
+    db.refresh(library)
+    return library
+
+def delete_library(db: Session, library_id: int, user_id: int) -> bool:
+    library = get_library(db, library_id, user_id)
+    if not library:
+        return False
+    db.delete(library)
+    db.commit()
+    return True

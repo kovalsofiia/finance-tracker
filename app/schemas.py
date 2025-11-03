@@ -114,5 +114,70 @@ class BalanceRead(BaseModel):
     class Config:
         from_attributes = True
 
+
+# MKR-1
+# Libraries
+
+class LibraryCreate(BaseModel):
+    library_name: str
+    city: str
+    books_amount: int
+    visitors_per_year: int
+
+    @field_validator("books_amount", "visitors_per_year")
+    @classmethod
+    def non_negative(cls, v):
+        if v < 0:
+            raise ValueError("Кількість книг та відвідувачів не може бути від'ємною")
+        return v
+
+    @field_validator("library_name", "city")
+    @classmethod
+    def not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Назва бібліотеки та місто не можуть бути порожніми")
+        return v.strip()
+
+    @field_validator("library_name", "city")
+    @classmethod
+    def max_length(cls, v):
+        if len(v) > 100:
+            raise ValueError("Поле не може перевищувати 100 символів")
+        return v
+
+class LibraryRead(BaseModel):
+    id: int
+    library_name: str
+    city: str
+    books_amount: int
+    visitors_per_year: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class LibraryUpdate(BaseModel):
+    library_name: Optional[str] = None
+    city: Optional[str] = None
+    books_amount: Optional[int] = None
+    visitors_per_year: Optional[int] = None
+
+
+class LibraryFilter(BaseModel):
+    search: Optional[str] = None
+    city: Optional[str] = None
+    min_books: Optional[int] = None
+    sort_by: Optional[str] = None  # "name", "books", "visitors", "created"
+    sort_order: Optional[str] = "desc"  # "asc" or "desc"
+
+
+class LibraryStats(BaseModel):
+    total_libraries: int
+    total_books: int
+    total_visitors: int
+
+
 # Оновлюємо рекурсію
 CategoryRead.model_rebuild()

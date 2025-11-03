@@ -206,3 +206,68 @@ def read_category_transactions(category_id: int, db: Session = Depends(get_db), 
     if not transactions and not db.query(models.Category).filter(models.Category.id == category_id, models.Category.user_id == current_user.id).first():
         raise HTTPException(status_code=404, detail="Category not found or not yours")
     return transactions
+
+
+
+
+# MKR-1
+# Libraries
+
+@app.post("/libraries/", response_model=schemas.LibraryRead)
+def create_library(
+    lib_in: schemas.LibraryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    return crud.create_library(db, current_user.id, lib_in)
+
+@app.get("/profile/libraries", response_model=list[schemas.LibraryRead])
+def read_user_libraries(
+    filters: schemas.LibraryFilter = Depends(),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    return crud.get_user_libraries(db, current_user.id, filters, skip, limit)
+
+@app.get("/profile/libraries/stats", response_model=list[schemas.LibraryRead])
+def get_my_library_stats(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    return crud.get_library_stats(db, current_user.id)
+
+@app.get("/libraries/{library_id}", response_model=schemas.LibraryRead)
+def read_library(
+    library_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    library = crud.get_library(db, library_id, current_user.id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Library not found or not yours")
+    return library
+
+@app.put("/libraries/{library_id}", response_model=schemas.LibraryRead)
+def update_library(
+    library_id: int,
+    lib_in: schemas.LibraryUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    updated = crud.update_library(db, library_id, current_user.id, lib_in)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Library not found or not yours")
+    return updated
+
+@app.delete("/libraries/{library_id}", status_code=204)
+def delete_library(
+    library_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    deleted = crud.delete_library(db, library_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Library not found or not yours")
+    return None

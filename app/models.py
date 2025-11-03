@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .database import Base
 from datetime import datetime
@@ -14,6 +14,9 @@ class User(Base):
 
     categories = relationship("Category", back_populates="user", cascade="all, delete")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete")
+
+    # MKR-1
+    libraries = relationship("Library", back_populates="user", cascade="all, delete")
 
 # models.py
 class Category(Base):
@@ -49,3 +52,23 @@ class Transaction(Base):
 
     user = relationship("User", back_populates="transactions")
     category = relationship("Category", back_populates="transactions")
+
+# MKR-1
+# Libraries
+
+class Library(Base):
+    __tablename__ = "libraries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    library_name = Column(String, index=True, nullable=False)
+    city = Column(String, nullable=False)
+    books_amount = Column(Integer, nullable=False)
+    visitors_per_year = Column(Integer, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="libraries")
+    __table_args__ = (
+        UniqueConstraint('user_id', 'library_name', 'city', name='uix_user_library_city'),
+    )
